@@ -1,0 +1,8 @@
+interface:
+  display_name: "Literature Review Workflow 综述推进"
+  short_description: "综述论文半自动生产推进台：读状态、跑走廊、停门等拍板"
+  default_prompt: >-
+    Use $literature-review-workflow to 推进综述工作流：读工作根目录 progress.md 状态块，
+    按 SKILL.md 走廊 SOP 调 scripts/ 脚本执行，只在人工闸门处停。
+
+

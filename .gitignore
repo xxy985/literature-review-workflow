@@ -1,0 +1,11 @@
+# Python cache and local tooling residue
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.pytest_cache/
+
+# Local environment files
+.venv/
+venv/
+*.env
+!.env.example
