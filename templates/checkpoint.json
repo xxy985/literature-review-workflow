@@ -1,0 +1,12 @@
+{
+  "weak_dimensions": [],
+  "pending_decisions": [],
+  "blocked_on": "",
+  "checkpoint": {
+    "unit": "C3-round02-reading",
+    "completed": [],
+    "next_action": "填写实际下一步动作后保存",
+    "artifacts": [],
+    "block_reason": ""
+  }
+}

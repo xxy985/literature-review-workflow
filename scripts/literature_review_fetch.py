@@ -55,9 +55,15 @@ def _parse_args(argv):
         help="本批成功名额：仅 ok 与 abstract_only 计入（默认 10）",
     )
     p.add_argument(
+        "--fulltext-only", action="store_true",
+        help="配额仅计全文成功；摘要仍入库，但不占名额（首轮必用）",
+    )
+    p.add_argument(
         "--email", default="", help="Unpaywall 优先请求邮箱（不填则跳过 Unpaywall）"
     )
     args = p.parse_args(argv)
+    if args.limit < 1:
+        p.error("--limit 必须为正整数")
     r = str(args.round).strip().upper()
     if r == "X":
         args.round = "X"
@@ -229,9 +235,9 @@ def _process(args, cand_path, lib, verify):
     manual_rows = []
     manual_path = ""
     for row in cands:
-        if c["ok"] + c["abstract_only"] >= args.limit:
+        if c["ok"] + (0 if args.fulltext_only else c["abstract_only"]) >= args.limit:
             break
-        if _in_library(row, lib_db, lib):
+        if _in_library(row, working, lib):
             c["skipped_dup"] += 1
             continue
         pid = lib.next_paper_id(working, args.round)
@@ -298,7 +304,7 @@ def _process(args, cand_path, lib, verify):
         lib.append_library(args.thread_dir, [entry])
         working.append(entry)
         c[status] += 1
-        if status == "manual_needed":
+        if status in ("manual_needed", "abstract_only"):
             manual_rows.append(
                 {
                     "paper_id": pid,

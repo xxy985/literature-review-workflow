@@ -11,7 +11,8 @@
   python literature_review_check.py <根> --cite-audit <md> [--strict]
   python literature_review_check.py <根> --mark-read <pid> --contribution "一句话" [--evidence A|B]
   python literature_review_check.py <根> --reset-attempt       # 抛弃重来：attempt+1，回 C1
-写库操作仅 mark-read / reset-attempt / advance，其余全部只读——AI 是操作者，本脚本是它的工具。
+状态写入：--checkpoint FILE / --at-gate / --advance / --reset-attempt。
+引用审计可加 --report FILE 保存新版本报告。--round 未通过返回2。
 --full 核验断言（exit 1 失败）：全库 xref_verified=true；排除账无回灌
 （DOI+题名双键，逆转行不计）；库内预印本信号独立扫描零命中。
 退出码：0 正常；1 输入/数据错误；2 --strict 审计不通过（未知引用）。
@@ -20,9 +21,11 @@
 import argparse
 import datetime
 import difflib
+import json
 import os
 import re
 import sys
+from urllib.parse import urlparse
 
 PID_RE = re.compile(r"\b(R\d{2}-\d{2,}|RX-\d{2,})\b")
 
@@ -61,17 +64,38 @@ def _parse_args(argv):
         "--evidence", default="A", choices=["A", "B"], help="证据级（默认 A 全文）"
     )
     p.add_argument("--reset-attempt", action="store_true", help="抛弃重来")
-    return p.parse_args(argv)
+    p.add_argument("--checkpoint", metavar="JSON", help="合并检查点文件（相对工作根目录）")
+    p.add_argument("--report", metavar="FILE", help="引用审计报告落盘路径（相对工作根目录）")
+    p.add_argument("--require-fulltext", type=int, default=0, help="轮验收所需全文数")
+    args = p.parse_args(argv)
+    actions = [args.corridor, args.advance, args.at_gate, args.round, args.full,
+               args.diff, args.cite_audit, args.mark_read, args.reset_attempt, args.checkpoint]
+    if sum(bool(x) for x in actions) != 1:
+        p.error("必须且只能选择一个子命令")
+    if args.require_fulltext < 0:
+        p.error("--require-fulltext 不可为负数")
+    return args
 
 
 def _write_report(path, lines):
     body = "\n".join(lines) + "\n"
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        with open(path, "x", encoding="utf-8", newline="\n") as fh:
             fh.write(body)
     except OSError as e:
         raise RuntimeError(f"写报告失败 {path}: {e}") from e
+
+
+def _report_path(path):
+    """保留历次验收依据，恢复时不能用新报告替换旧检查点的目标。"""
+    stem, ext = os.path.splitext(path)
+    version = 2
+    candidate = path
+    while os.path.exists(candidate):
+        candidate = f"{stem}-v{version}{ext}"
+        version += 1
+    return candidate
 
 
 def _read_text(path):
@@ -123,7 +147,12 @@ def _preprint_hits(rows, lib):
         if d.startswith(PREPRINT_DOI_PREFIXES):
             hits.append(f"{r.get('paper_id', '?')}（DOI 前缀 {d.split('/')[0]}）")
             continue
-        hay = f"{r.get('venue') or ''} {r.get('url') or ''}".lower()
+        url = (r.get("url") or "").lower()
+        host = urlparse(url).hostname or ""
+        verified = str(r.get("xref_verified") or "").lower() in ("true", "1")
+        # 正式DOI的全文可托管在arXiv；出版场所仍独立检查。
+        formal_mirror = bool(d and verified and (host == "arxiv.org" or host.endswith(".arxiv.org")))
+        hay = f"{r.get('venue') or ''} {'' if formal_mirror else url}".lower()
         matched = [h for h in verify.PREPRINT_HOSTS if h in hay]
         if matched:
             hits.append(
@@ -162,6 +191,11 @@ def corridor(args, lib):
 
 def round_report(args, lib):
     rw = args.round.strip().upper()
+    try:
+        rw = "X" if rw == "X" else str(int(rw))
+        lib.round_tag(rw)
+    except (ValueError, RuntimeError):
+        raise RuntimeError("--round 需为1-99或X")
     rows = lib.load_library(args.work_dir)
     picked = [r for r in rows if (r.get("round") or "").strip().upper() == rw]
     lines = [
@@ -180,25 +214,32 @@ def round_report(args, lib):
     missing_md = [
         r["paper_id"]
         for r in picked
-        if r.get("fetch_status") == "ok" and not r.get("md_path")
+        if r.get("fetch_status") == "ok" and (
+            not r.get("md_path") or not os.path.isfile(os.path.join(args.work_dir, r["md_path"])))
     ]
     if missing_md:
         lines.append(f"⚠ ok 但无 md（convert 未跑？）：{'、'.join(missing_md)}")
-    unread = [r["paper_id"] for r in picked if r.get("is_read") != "1"]
+    eligible = [r for r in picked if r.get("fetch_status") in ("ok", "abstract_only")]
+    unread = [r["paper_id"] for r in eligible if r.get("is_read") != "1"]
     if unread:
         lines.append(f"○ 未精读：{len(unread)} 篇")
     lines.append("")
     gate_ok = (
-        len(picked) > 0
+        len(eligible) > 0
         and not missing_md
-        and sum(1 for r in picked if r.get("fetch_status") == "ok") / len(picked) >= 0.8
+        and not unread
+        and all(r.get("evidence") in ("A", "B") for r in eligible)
+        and not any(r.get("parse_quality") in ("low", "failed", "pending", "")
+                    for r in picked if r.get("fetch_status") == "ok")
+        and sum(r.get("fetch_status") == "ok" for r in picked) >= args.require_fulltext
     )
     lines.append(
-        f"结论：ok 占比 {'≥' if gate_ok else '<'} 80% 闸门"
+        f"结论：轮验收{'通过' if gate_ok else '未通过'}（有效条目的精读、解析与所需全文数）"
         f"（当前 {sum(1 for r in picked if r.get('fetch_status') == 'ok')}/{len(picked)}）"
     )
     name = f"round{rw.upper()}-验收.md"
-    out = os.path.join(args.work_dir, "artifacts", "03-library", name)
+    lines.append("待人工补缺条目单列，不占有效语料名额；A/B比例供判断，不设隐藏比例门槛。")
+    out = _report_path(os.path.join(args.work_dir, "artifacts", "03-library", name))
     try:
         _write_report(out, lines)
     except RuntimeError as e:
@@ -206,7 +247,7 @@ def round_report(args, lib):
         return 1
     print("\n".join(lines))
     print(f"报告落盘：{out}")
-    return 0
+    return 0 if gate_ok else 2
 
 
 def full_exam(args, lib):
@@ -215,6 +256,7 @@ def full_exam(args, lib):
         "# 库体检报告",
         f"生成：{datetime.date.today().isoformat()}",
         f"库内总数：{len(rows)}",
+        "空库不能通过体检。" if not rows else "核验范围：当前全局库。",
         "",
     ]
     for field in ("doi", "year", "venue", "title", "authors"):
@@ -329,12 +371,12 @@ def full_exam(args, lib):
         )
     else:
         lines.append("- 无孤儿文件（PDF 目录与库一致）")
-    out = os.path.join(
+    out = _report_path(os.path.join(
         args.work_dir,
         "artifacts",
         "03-library",
         f"库体检-{datetime.date.today().strftime('%Y%m%d')}.md",
-    )
+    ))
     try:
         _write_report(out, lines)
     except RuntimeError as e:
@@ -342,7 +384,7 @@ def full_exam(args, lib):
         return 1
     print("\n".join(lines))
     print(f"报告落盘：{out}")
-    if unverified or backflow or pp_hits:
+    if not rows or unverified or backflow or pp_hits:
         print(
             "⛔ 核验断言未通过（见报告“核验断言”节），以退出码 1 失败。",
             file=sys.stderr,
@@ -393,10 +435,10 @@ def diff_report(args, lib, old, new):
     lines += diff_lines[:400]
     if len(diff_lines) > 400:
         lines.append(f"…（截断，共 {len(diff_lines)} 行 diff）")
-    out = os.path.join(
+    out = _report_path(os.path.join(
         os.path.dirname(os.path.abspath(new)),
         os.path.splitext(os.path.basename(new))[0] + "-修改日志.md",
-    )
+    ))
     try:
         _write_report(out, lines)
     except RuntimeError as e:
@@ -437,9 +479,25 @@ def cite_audit(args, lib, path):
             "  提醒：B 级仅可支撑非核心论点（D2 拍板）；是否合规由 AI/用户判断，"
             "最终文章不出现标记。"
         )
-    if not unknown and not b_used:
-        print("✓ 全部引用均为库内 A 级（全文精读）")
-    if unknown and args.strict:
+    unready = sorted(p for p in counts if p in known and (
+        known[p].get("is_read") != "1" or known[p].get("evidence") not in ("A", "B")
+        or (known[p].get("evidence") == "A" and known[p].get("fetch_status") != "ok")))
+    lines = [f"# 引用机械审计：{os.path.basename(target)}",
+             f"识别引用种类：{len(counts)}", f"未知编号：{', '.join(unknown) or '无'}",
+             f"未完成阅读或证据状态不完整：{', '.join(unready) or '无'}",
+             f"摘要级引用：{', '.join(b_used) or '无'}",
+             "本检查只验证编号与阅读状态，不证明论文支持对应论断。"]
+    if not counts:
+        lines.append("未识别到 paper_id，不能认定引用通过；请审计保留编号的工作稿。")
+    if not unknown and not unready and counts:
+        lines.append("编号与阅读状态检查通过；仍需按 claim-review.md 核回原文。")
+    print("\n".join(lines))
+    if args.report:
+        report = args.report if os.path.isabs(args.report) else os.path.join(args.work_dir, args.report)
+        if os.path.exists(report):
+            raise RuntimeError("报告已存在，请使用新版本文件名：" + report)
+        _write_report(report, lines)
+    if (unknown or unready or not counts) and args.strict:
         return 2
     return 0
 
@@ -448,6 +506,14 @@ def mark_read(args, lib):
     if not args.contribution.strip():
         print("--contribution 必填（一句话贡献）", file=sys.stderr)
         return 1
+    row = next((r for r in lib.load_library(args.work_dir) if r.get("paper_id") == args.mark_read), None)
+    if row and args.evidence == "A":
+        md = row.get("md_path") or ""
+        if (row.get("fetch_status") != "ok" or not md
+                or row.get("parse_quality") in ("low", "failed", "pending", "")
+                or not os.path.isfile(os.path.join(args.work_dir, md))):
+            print("A 级需已取得全文并有可读转换文件。", file=sys.stderr)
+            return 1
     try:
         hit = lib.update_library_row(
             args.work_dir,
@@ -470,8 +536,8 @@ def mark_read(args, lib):
 
 def at_gate(args, lib):
     gate = args.at_gate.strip()
-    if not gate:
-        print("--at-gate 需要门名（如 门2）", file=sys.stderr)
+    if gate not in ("门1", "门2", "门3", "门4"):
+        print("--at-gate 只接受 门1 至 门4", file=sys.stderr)
         return 1
     state = lib.read_state(args.work_dir)
     if not state:
@@ -524,6 +590,8 @@ def reset_attempt(args, lib):
             corridor="C1",
             gate="",
             blocked_on="",
+            weak_dimensions=[], pending_decisions=[],
+            checkpoint={}, theme_boundary="",
             rounds={
                 "planned": state.get("rounds", {}).get("planned", 4),
                 "completed": 0,
@@ -543,6 +611,56 @@ def reset_attempt(args, lib):
     return 0
 
 
+def checkpoint(args, lib):
+    """接收显式白名单字段，数据计数由账本派生，不提供任意状态执行入口。"""
+    path = args.checkpoint if os.path.isabs(args.checkpoint) else os.path.join(args.work_dir, args.checkpoint)
+    try:
+        data = json.loads(_read_text(path))
+    except ValueError as e:
+        raise RuntimeError(f"检查点 JSON 无效：{e}") from e
+    allowed = {"theme", "theme_boundary", "weak_dimensions", "rounds", "pending_decisions", "blocked_on", "checkpoint"}
+    if not isinstance(data, dict) or not data or set(data) - allowed:
+        raise RuntimeError("检查点为空或含未允许字段；不能改 corridor/gate/attempt/papers。")
+    state = lib.read_state(args.work_dir)
+    if not state:
+        raise RuntimeError("请先自举工作根目录。")
+    for key in ("theme", "theme_boundary"):
+        if key in data and not isinstance(data[key], str):
+            raise RuntimeError(key + " 必须是文本")
+    for key in ("weak_dimensions", "pending_decisions"):
+        if key in data and (not isinstance(data[key], list) or any(not isinstance(x, str) for x in data[key])):
+            raise RuntimeError(key + " 必须是文本列表")
+    if "blocked_on" in data and data["blocked_on"] not in ("", "user", "jiaozi", "environment"):
+        raise RuntimeError("blocked_on 只允许空/user/jiaozi/environment")
+    if "rounds" in data:
+        r = data["rounds"]
+        if not isinstance(r, dict) or set(r) - {"planned", "completed"} or any(type(v) is not int for v in r.values()):
+            raise RuntimeError("rounds 只允许整数 planned/completed")
+        r = dict(state.get("rounds", {}), **r)
+        if not 4 <= r.get("planned", 0) <= 8 or not 0 <= r.get("completed", -1) <= 8:
+            raise RuntimeError("planned 需为4-8，completed 需为0-8")
+        data["rounds"] = r
+    if "checkpoint" in data:
+        c = data["checkpoint"]
+        if not isinstance(c, dict) or set(c) != {"unit", "completed", "next_action", "artifacts", "block_reason"}:
+            raise RuntimeError("checkpoint 必须含 unit/completed/next_action/artifacts/block_reason")
+        if any(not isinstance(c[k], str) for k in ("unit", "next_action", "block_reason")):
+            raise RuntimeError("检查点描述必须是文本")
+        if any(not isinstance(c[k], list) or any(not isinstance(v, str) for v in c[k]) for k in ("completed", "artifacts")):
+            raise RuntimeError("completed/artifacts 必须是文本列表")
+        for relative in c["artifacts"]:
+            base = os.path.realpath(args.work_dir)
+            resolved = os.path.realpath(os.path.join(base, relative))
+            if os.path.isabs(relative) or os.path.commonpath([base, resolved]) != base or not os.path.isfile(resolved):
+                raise RuntimeError("产物应是工作根目录内已存在文件：" + relative)
+    if state.get("gate") and data.get("blocked_on", "user") != "user":
+        raise RuntimeError("停门期间不能清除等待；用户批准后使用 --advance。")
+    data["papers"] = dict(state.get("papers", {}), **lib.paper_counts(args.work_dir))
+    lib.write_state(args.work_dir, **data)
+    print("检查点已保存；计数来自全局库，当前尝试纳入范围见恢复清单。")
+    return 0
+
+
 def main(argv=None):
     args = _parse_args(argv)
     import literature_review_lib as lib
@@ -552,6 +670,8 @@ def main(argv=None):
         print(f"工作根目录不存在：{args.work_dir}", file=sys.stderr)
         return 1
     try:
+        if args.checkpoint:
+            return checkpoint(args, lib)
         if args.corridor:
             return corridor(args, lib)
         if args.round:

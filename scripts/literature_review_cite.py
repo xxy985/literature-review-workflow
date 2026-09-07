@@ -259,8 +259,10 @@ def run(args, lib, verify):
         if args.mode in ('cited', 'both'):
             _gather_cited(lib, limiter, wid, p.get('paper_id'),
                           args.per_page_cap, cited_edges, meta)
-    if args.mode in ('refs', 'both') and refs_edges:
-        _batch_meta(lib, limiter, list(refs_edges), meta)
+    if args.mode in ('refs', 'both'):
+        discovered = set(refs_edges) | related_set
+        if discovered:
+            _batch_meta(lib, limiter, sorted(discovered), meta)
     rows = []
     for wid, w in meta.items():
         row = _parse_work(w, lib, ctx)

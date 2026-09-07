@@ -49,6 +49,7 @@ import os
 import random
 import re
 import sys
+import tempfile
 import time
 import unicodedata
 import urllib.error
@@ -532,7 +533,7 @@ def write_state(thread_dir, **updates):
             if STATE_BEGIN in text:
                 text = re.sub(
                     re.escape(STATE_BEGIN) + r".*?" + re.escape(STATE_END),
-                    block,
+                    lambda _match: block,
                     text,
                     count=1,
                     flags=re.S,
@@ -546,8 +547,16 @@ def write_state(thread_dir, **updates):
                 "标记以下为自然语言进度区。）\n"
             )
         os.makedirs(thread_dir, exist_ok=True)
-        with open(path, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(text)
+        fd, temporary = tempfile.mkstemp(prefix=".progress-", dir=thread_dir)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(text)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(temporary, path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
     except OSError as e:
         raise RuntimeError(f"写入 progress.md 失败：{path} :: {e}") from e
     return state
