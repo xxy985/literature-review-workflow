@@ -11,6 +11,7 @@
 import argparse
 import platform
 import sys
+import shutil
 
 OK, WARN, BAD = "✓", "!", "✗"
 
@@ -18,6 +19,7 @@ OK, WARN, BAD = "✓", "!", "✗"
 def main(argv=None):
     p = argparse.ArgumentParser(description="literature-review-workflow 环境自检")
     p.add_argument("--net", action="store_true", help="附加连通性探测（2 次请求）")
+    p.add_argument("--delivery", action="store_true", help="LaTeX 交付依赖缺失时失败")
     args = p.parse_args(argv)
     import literature_review_lib as lib
 
@@ -81,6 +83,10 @@ def main(argv=None):
                 st, note = WARN, f"不可达：{e}"
             row(st, f"网络 {label}", note)
     print("== 结论 ==")
+    for executable in ("latexmk", "xelatex"):
+        present = shutil.which(executable)
+        row(OK if present else (BAD if args.delivery else WARN), executable,
+            present or "C8 必需：安装 TeX Live 或 MiKTeX 后重试；不能用 Word 替代终稿")
     if fatal[0]:
         print("核心环境故障：先解决上述 ✗ 项再部署。")
         return 1
@@ -93,4 +99,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     sys.exit(main())
-

@@ -14,7 +14,7 @@
   403/404 立即失败（付费墙语义，不重试不绕过）。
 
 LIBRARY_FIELDS（source/papers/library.tsv 的 22 列，篇级唯一真相源）：
-  paper_id        论文编号，R<轮>-<序号>，扩圈批次记 RX-<序号>
+  doi        规范化 DOI，作为论文唯一标识
   title / authors / year / venue / volume / issue / pages   书目信息
   doi / url       身份与全文链接
   oa              是否开放获取（1/0）
@@ -59,7 +59,6 @@ import urllib.request as _urlreq
 # ---------- 常量 ----------
 
 LIBRARY_FIELDS = [
-    "paper_id",
     "title",
     "authors",
     "year",
@@ -80,6 +79,8 @@ LIBRARY_FIELDS = [
     "contribution",
     "evidence",
     "xref_verified",
+    "norm_type",
+    "review_field",
     "added_at",
 ]
 EXCLUDED_FIELDS = ["excluded_at", "title", "doi", "reason"]
@@ -311,6 +312,8 @@ def _read_tsv(path, fields):
     try:
         with open(path, encoding="utf-8", newline="") as fh:
             rd = csv.DictReader(fh, delimiter="\t")
+            if rd.fieldnames != fields:
+                raise RuntimeError("账本字段不符合当前 DOI 契约，请在新目录重新核验导入：" + path)
             return [dict(r) for r in rd]
     except OSError as e:
         raise RuntimeError(f"读取账本失败：{path} :: {e}") from e
@@ -343,18 +346,38 @@ def load_library(thread_dir):
     return _read_tsv(os.path.join(thread_dir, LIBRARY_REL), LIBRARY_FIELDS)
 
 
+def normalize_doi(value):
+    value = re.sub(r"^(?:https?://(?:dx\.)?doi\.org/|doi:\s*)", "", (value or "").strip(), flags=re.I).lower()
+    return value if re.fullmatch(r"10\.\d{4,9}/\S+", value) else ""
+
+
+def doi_filename(doi):
+    from urllib.parse import quote
+    value = normalize_doi(doi)
+    if not value:
+        raise RuntimeError("无效 DOI：" + str(doi))
+    return quote(value, safe="")
+
+
 def append_library(thread_dir, entries):
+    entries = [dict(r) for r in entries]
+    seen = {r["doi"] for r in load_library(thread_dir)}
+    for row in entries:
+        row["doi"] = normalize_doi(row.get("doi"))
+        if not row["doi"] or row["doi"] in seen:
+            raise RuntimeError("入库 DOI 缺失、无效或重复")
+        seen.add(row["doi"])
     _append_tsv(os.path.join(thread_dir, LIBRARY_REL), LIBRARY_FIELDS, entries)
 
 
-def update_library_row(thread_dir, paper_id, **fields):
-    """按 paper_id（大小写不敏感）更新指定列；找不到行返回 False。"""
+def update_library_row(thread_dir, doi, **fields):
+    """按 doi（大小写不敏感）更新指定列；找不到行返回 False。"""
     path = os.path.join(thread_dir, LIBRARY_REL)
     rows = _read_tsv(path, LIBRARY_FIELDS)
-    target = (paper_id or "").strip().upper()
+    target = normalize_doi(doi)
     hit = False
     for r in rows:
-        if (r.get("paper_id") or "").strip().upper() == target:
+        if target and normalize_doi(r.get("doi")) == target:
             hit = True
             for k, v in fields.items():
                 if k in LIBRARY_FIELDS:
@@ -384,7 +407,7 @@ def append_excluded(thread_dir, title, doi, reason):
             {
                 "excluded_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "title": title or "",
-                "doi": doi or "",
+                "doi": normalize_doi(doi),
                 "reason": reason or "",
             }
         ],
@@ -433,26 +456,6 @@ def round_tag(round_no):
     if not 1 <= rn <= 99:
         raise RuntimeError(f"轮次编号超出 1-99：{rn}")
     return f"{rn:02d}"
-
-
-def next_paper_id(rows, round_no):
-    """生成下一个 paper_id。round_no 为整数轮次或 'X'（扩圈批次）。
-
-    轮次合法性复用 round_tag 的严格校验（拒绝 bool/1.9/越界，2026-09-05 评审 R2）。
-    """
-    if isinstance(round_no, str) and round_no.strip().upper() == "X":
-        prefix = "RX-"
-    else:
-        prefix = f"R{round_tag(round_no)}-"  # 校验失败抛 RuntimeError
-    max_seq = 0
-    for r in rows or []:
-        pid = (r.get("paper_id") or "").strip()
-        if pid.startswith(prefix):
-            try:
-                max_seq = max(max_seq, int(pid[len(prefix) :]))
-            except ValueError:
-                continue
-    return f"{prefix}{max_seq + 1:02d}"
 
 
 def normalize_title(s):
@@ -603,9 +606,8 @@ def _selftest():
             "状态块读写往返",
             st.get("theme") == "测试主题" and st.get("papers", {}).get("target") == 40,
         )
-        rows = [{"paper_id": "R01-01"}, {"paper_id": "R01-02"}, {"paper_id": "RX-01"}]
-        check("next_paper_id 轮内递增", next_paper_id(rows, 1) == "R01-03")
-        check("next_paper_id 扩圈 X 批", next_paper_id(rows, "X") == "RX-02")
+        check("DOI 归一", normalize_doi("https://doi.org/10.1000/X") == "10.1000/x")
+        check("DOI 文件编码", doi_filename("10.1000/x") == "10.1000%2Fx")
         strict_rejects = 0
         for bad in (1.9, True, 100, "2.0", ""):
             try:
@@ -618,14 +620,14 @@ def _selftest():
         )
         np_rejected = False
         try:
-            next_paper_id(rows, 100)
+            doi_filename("invalid")
         except RuntimeError:
             np_rejected = True
-        check("next_paper_id 越界轮次拒绝", np_rejected)
+        check("无效 DOI 拒绝", np_rejected)
         append_library(
-            td, [{"paper_id": "R01-01", "title": "Paper One", "fetch_status": "ok"}]
+            td, [{"doi": "10.1000/x", "title": "Paper One", "fetch_status": "ok"}]
         )
-        hit = update_library_row(td, "r01-01", is_read=1, contribution="贡献一句话")
+        hit = update_library_row(td, "10.1000/X", is_read=1, contribution="贡献一句话")
         rows = load_library(td)
         check(
             "库行更新往返",
@@ -668,4 +670,3 @@ def _main(argv=None):
 
 if __name__ == "__main__":
     sys.exit(_main())
-

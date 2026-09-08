@@ -5,10 +5,10 @@
   <thread_dir> --candidates <tsv> --round N|X [--limit 10] [--email x@y.z]
     —— 依次核验并下载候选（tsv 为相对 thread_dir 或绝对路径）。
   <thread_dir> --collect-manual --round N|X
-    —— 扫描 source/manual/roundNN|XX/ 下 R02-03.pdf / RX-01.pdf 命名的文件，
+    —— 扫描 source/manual/roundNN|XX/ 下以 DOI 百分号编码命名的 PDF，
        复制进 source/papers/roundNN|XX/ 并更新库行。
 输出：
-  PDF：source/papers/roundNN|XX/<paper_id>.pdf
+  PDF：source/papers/roundNN|XX/<doi>.pdf
   库：source/papers/library.tsv 新增/更新行
   清单：source/manual/人工补缺-roundNN|XX.tsv（manual_needed 行）
   日志：notes/history/run-log.tsv
@@ -24,16 +24,19 @@ import os
 import re
 import shutil
 import sys
+from urllib.parse import unquote
+from literature_review_lib import normalize_doi, doi_filename
 
 OA_BASE = "https://api.openalex.org/works"
 UP_BASE = "https://api.unpaywall.org/v2"
-PDF_RE = re.compile(r"^[Rr](?:\d{2}|[Xx])-\d{2,}\.pdf$")
-EXTRA_FIELDS = ("volume", "issue", "pages")
+PDF_RE = re.compile(r"^10\..+\.pdf$", re.I)
+EXTRA_FIELDS = ("volume", "issue", "pages", "norm_type")
 
 
 def _parse_args(argv):
     p = argparse.ArgumentParser(description="候选文献核验、下载入库；或人工补缺配对")
     p.add_argument("thread_dir", help="工作线程根目录")
+    p.add_argument("--review-field", choices=["computer-science", "other"], default="other", help="门1确认的课题领域；仅计算机相关领域接受会议论文")
     p.add_argument(
         "--round",
         required=True,
@@ -108,9 +111,9 @@ def _resolve(verify, title):
         return ""
 
 
-def _verify_safe(verify, doi):
+def _verify_safe(verify, doi, review_field="other"):
     try:
-        return _verify_outcome(verify.verify_batch([doi]))
+        return _verify_outcome(verify.verify_batch([doi], review_field=review_field))
     except Exception as e:
         return (
             False,
@@ -130,12 +133,9 @@ def _arxiv_id(native_id, url):
 
 
 def _in_library(row, lib_db, lib):
-    doi = (row.get("doi") or "").strip().lower()
-    t = lib.normalize_title(row.get("title") or "")
+    doi = lib.normalize_doi(row.get("doi"))
     for p in lib_db:
-        if doi and doi == (p.get("doi") or "").strip().lower():
-            return True
-        if t and t == lib.normalize_title(p.get("title") or ""):
+        if doi and doi == lib.normalize_doi(p.get("doi")):
             return True
     return False
 
@@ -143,7 +143,6 @@ def _in_library(row, lib_db, lib):
 def _make_entry(row, pid, rnd, tag, doi, url, src, extra, oa_flag, status, evidence):
     """构造一条符合库字段约定的行（tag = round_tag，目录名用）。"""
     return {
-        "paper_id": pid,
         "title": row.get("title") or "",
         "authors": row.get("authors") or "",
         "year": row.get("year") or "",
@@ -156,7 +155,7 @@ def _make_entry(row, pid, rnd, tag, doi, url, src, extra, oa_flag, status, evide
         "oa": oa_flag,
         "round": rnd,
         "source": src or row.get("source_db") or "",
-        "pdf_path": os.path.join("source", "papers", "round" + tag, pid + ".pdf")
+        "pdf_path": os.path.join("source", "papers", "round" + tag, doi_filename(doi) + ".pdf")
         if status == "ok"
         else "",
         "md_path": "",
@@ -166,13 +165,14 @@ def _make_entry(row, pid, rnd, tag, doi, url, src, extra, oa_flag, status, evide
         "contribution": "",
         "evidence": evidence,
         "xref_verified": True,
+        "norm_type": extra.get("norm_type") or "",
         "added_at": "",
     }
 
 
 def _download(dest_dir, pid, doi, row, email, lib, limiter):
     """下载链：OpenAlex best_oa_location.pdf_url -> Unpaywall -> 已核验正式版的 arXiv 镜像。"""
-    dest = os.path.join(dest_dir, pid + ".pdf")
+    dest = os.path.join(dest_dir, doi_filename(doi) + ".pdf")
     try:
         data = lib.http_get_json(
             OA_BASE, params={"filter": "doi:" + doi}, limiter=limiter
@@ -217,7 +217,7 @@ def _write_rows(path, cols, rows):
 def _process(args, cand_path, lib, verify):
     limiter = lib.RateLimiter()
     lib_db = lib.load_library(args.thread_dir)
-    working = [dict(p) for p in lib_db]  # next_paper_id 用的递增镜像
+    working = [dict(p) for p in lib_db]
     try:
         with open(cand_path, encoding="utf-8", newline="") as fh:
             cands = [dict(r) for r in csv.DictReader(fh, delimiter="\t")]
@@ -240,8 +240,7 @@ def _process(args, cand_path, lib, verify):
         if _in_library(row, working, lib):
             c["skipped_dup"] += 1
             continue
-        pid = lib.next_paper_id(working, args.round)
-        doi = (row.get("doi") or "").strip()
+        doi = normalize_doi(row.get("doi"))
         is_arx = (row.get("source_db") or "").strip().lower() == "arxiv"
         is_pp = (row.get("type") or "").strip().lower() == "preprint"
         # 1) 身份解析：arXiv 来源或预印本且无正式 DOI -> 找正式版
@@ -259,7 +258,7 @@ def _process(args, cand_path, lib, verify):
                 )
                 c["excluded"] += 1
                 continue
-            doi = str(formal).strip()
+            doi = normalize_doi(formal)
         if not doi:
             lib.append_excluded(args.thread_dir, row.get("title") or "", "", "no_doi")
             lib.log_run(
@@ -271,7 +270,11 @@ def _process(args, cand_path, lib, verify):
             c["excluded"] += 1
             continue
         # 2) 核验：verdict != accept -> 排除（预印本一律排除为既定决策）
-        acc, verdict, extra = _verify_safe(verify, doi)
+        pid = doi
+        if _in_library({"doi": doi}, working, lib):
+            c["skipped_dup"] += 1
+            continue
+        acc, verdict, extra = _verify_safe(verify, doi, args.review_field)
         if not acc:
             lib.append_excluded(args.thread_dir, row.get("title") or "", doi, verdict)
             lib.log_run(
@@ -301,20 +304,20 @@ def _process(args, cand_path, lib, verify):
         entry = _make_entry(
             row, pid, args.round, tag, doi, url, src, extra, oa_flag, status, evidence
         )
+        entry["review_field"] = args.review_field
         lib.append_library(args.thread_dir, [entry])
         working.append(entry)
         c[status] += 1
         if status in ("manual_needed", "abstract_only"):
             manual_rows.append(
                 {
-                    "paper_id": pid,
                     "title": row.get("title") or "",
                     "authors": row.get("authors") or "",
                     "year": row.get("year") or "",
                     "venue": row.get("venue") or "",
                     "doi": doi,
                     "url": row.get("url") or "",
-                    "说明": f"请手动下载后命名为 {pid}.pdf 放入 "
+                    "说明": f"请手动下载后命名为 {doi_filename(doi)}.pdf 放入 "
                     f"source/manual/round{tag}/ 目录",
                 }
             )
@@ -332,7 +335,7 @@ def _process(args, cand_path, lib, verify):
         try:
             _write_rows(
                 manual_path,
-                ["paper_id", "title", "authors", "year", "venue", "doi", "url", "说明"],
+                ["doi", "title", "authors", "year", "venue", "url", "说明"],
                 manual_rows,
             )
         except RuntimeError as e:
@@ -367,15 +370,15 @@ def _collect_manual(args, lib):
     lib_db = lib.load_library(args.thread_dir)
     matched, no_row, upd_fail = [], [], []
     for f in files:
-        pid = f[:-4].upper()
+        pid = normalize_doi(unquote(f[:-4]))
         row = next(
-            (p for p in lib_db if (p.get("paper_id") or "").upper() == pid), None
+            (p for p in lib_db if p.get("doi") == pid and str(p.get("round")).upper() == str(args.round).upper()), None
         )
         if row is None:
             no_row.append(f)
             continue
-        shutil.copy2(os.path.join(src_dir, f), os.path.join(dst_dir, pid + ".pdf"))
-        rel = os.path.join("source", "papers", "round" + tag, pid + ".pdf")
+        shutil.copy2(os.path.join(src_dir, f), os.path.join(dst_dir, doi_filename(pid) + ".pdf"))
+        rel = os.path.join("source", "papers", "round" + tag, doi_filename(pid) + ".pdf")
         if lib.update_library_row(
             args.thread_dir,
             pid,
@@ -388,7 +391,7 @@ def _collect_manual(args, lib):
             upd_fail.append(f)
     print(f"人工补缺配对：扫描 {len(files)} 个 PDF，配对成功 {len(matched)} 个")
     if no_row:
-        print("库中无对应 paper_id（未处理）：" + ", ".join(no_row))
+        print("库中无对应 doi（未处理）：" + ", ".join(no_row))
     if upd_fail:
         print("更新库失败：" + ", ".join(upd_fail))
     lib.log_run(
@@ -430,4 +433,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     sys.exit(main())
-

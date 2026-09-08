@@ -67,7 +67,7 @@ python scripts/literature_review_env_check.py --net
 
 注册后明确要求“启动综述流程”，Agent 按 `SKILL.md` 自举工作根目录并推进到第一个人工门。之后说“推进”可继续；停在决策门时需回答该门问题。只注册或讨论技能不会自动启动论文生产。
 
-命令示例中的 `scripts/` 相对技能根目录。Agent实际调用推荐使用脚本和输入文件的绝对路径，以便从任意当前目录运行。旧工作目录仍可读取原状态块；首次恢复按 `references/recovery.md` 补检查点，不重新自举或清空文献库。
+命令示例中的 `scripts/` 相对技能根目录。Agent实际调用推荐使用脚本和输入文件的绝对路径。当前版统一使用 DOI，不兼容旧编号库；请在独立目录重新核验导入，保留旧资料。版本历史见 [CHANGELOG](CHANGELOG.md)。
 
 ## 能力要求
 
@@ -79,6 +79,7 @@ python scripts/literature_review_env_check.py --net
 | 网络访问 OpenAlex/CrossRef | 检索和正式发表核验 | C1-C3 |
 | `pymupdf` | PDF 转 Markdown | C2-C3 |
 | `python-docx` | DOCX 交接 | C7-C8 |
+| latexmk + XeLaTeX（TeX Live / MiKTeX） | LaTeX 源码编译为终稿 PDF | C8 必需 |
 
 检索、核验和账本核心只使用 Python 标准库；完整流程的阶段性依赖见 `requirements.txt`。没有脚本执行能力时，可以参考流程规则进行人工处理，但无法完成完整的机械链路。
 
@@ -107,6 +108,8 @@ python scripts/literature_review_env_check.py --net
 ## 重要边界
 
 - 预印本不进入正式文献库；已正式发表论文可以使用其预印本镜像作为全文来源。
+- 仅计算机相关领域接受会议论文；其他领域及未确认领域默认排除。CrossRef 确认正式类型，OpenAlex article 不能证明是期刊论文。
+- DOI 为全程唯一论文标识。最终交付固定为 LaTeX 工程及编译 PDF；Word 仅作助理交接。
 - 不绕过付费墙；下载失败会留下人工补缺清单。
 - 摘要级证据只能支撑非核心论点，不能伪装成全文证据。
 - 所有材料只落本地，不自动上传、发布、邮件发送或同步到外部服务。
@@ -117,15 +120,17 @@ python scripts/literature_review_env_check.py --net
 
 当前版本已包含：
 
-- 12 个 Python 工具脚本；
+- 13 个 Python 工具脚本；
 - CrossRef/OpenAlex 核验和预印本过滤；
 - 引文、被引和相关推荐扩圈；
 - AI 手工扩圈筛选和盲区审计模板；
-- PDF/Markdown/DOCX 交接链路；
+- PDF/Markdown/DOCX 交接与 LaTeX 编译链路；
 - 版本差异、引用和全库审计。
 - 可验证产物的检查点写入、逐单元恢复和原子状态保存；
 - 精读证据、跨论文综合及核心论断核验规范；
-- 工作稿 paper_id 与终稿引文映射，显式区分机械审计和语义核验。
+- 工作稿 `[doi:...]` 与终稿引文映射，显式区分机械审计和语义核验。
+
+交付前执行 `python scripts/literature_review_env_check.py --delivery`；编译入口为 `python scripts/literature_review_latex.py <工程目录> <新交付目录>`，详见 [LaTeX交付规范](references/latex-delivery.md)。缺编译器或编译失败即阻塞，不能以 Word/Markdown 替代终稿。
 
 维护者可运行 `python -m unittest discover -s evals -p "test_*.py" -v`。引用审计 `--strict` 在零可识别引用、未知编号或阅读状态不完整时失败；轮验收未通过返回2。`--fulltext-only` 让首轮配额只计全文；下载中断后的 `--limit` 是本次新增名额，需扣除已取得数量。
 

@@ -27,7 +27,7 @@ import re
 import sys
 from urllib.parse import urlparse
 
-PID_RE = re.compile(r"\b(R\d{2}-\d{2,}|RX-\d{2,})\b")
+PID_RE = re.compile(r"\[doi:([^\]\s]+)\]", re.I)
 
 NEXT_HINT = {
     "C1": "C1（定方向）：设计 3-5 组检索式 → literature_review_search → 候选池报告 → 停 门1（检索方案确认）",
@@ -145,7 +145,7 @@ def _preprint_hits(rows, lib):
     for r in rows:
         d = (r.get("doi") or "").strip().lower()
         if d.startswith(PREPRINT_DOI_PREFIXES):
-            hits.append(f"{r.get('paper_id', '?')}（DOI 前缀 {d.split('/')[0]}）")
+            hits.append(f"{r.get('doi', '?')}（DOI 前缀 {d.split('/')[0]}）")
             continue
         url = (r.get("url") or "").lower()
         host = urlparse(url).hostname or ""
@@ -156,7 +156,7 @@ def _preprint_hits(rows, lib):
         matched = [h for h in verify.PREPRINT_HOSTS if h in hay]
         if matched:
             hits.append(
-                f"{r.get('paper_id', '?')}（venue/URL 命中 {'、'.join(matched)}）"
+                f"{r.get('doi', '?')}（venue/URL 命中 {'、'.join(matched)}）"
             )
     return hits
 
@@ -212,7 +212,7 @@ def round_report(args, lib):
         "",
     ]
     missing_md = [
-        r["paper_id"]
+        r["doi"]
         for r in picked
         if r.get("fetch_status") == "ok" and (
             not r.get("md_path") or not os.path.isfile(os.path.join(args.work_dir, r["md_path"])))
@@ -220,7 +220,7 @@ def round_report(args, lib):
     if missing_md:
         lines.append(f"⚠ ok 但无 md（convert 未跑？）：{'、'.join(missing_md)}")
     eligible = [r for r in picked if r.get("fetch_status") in ("ok", "abstract_only")]
-    unread = [r["paper_id"] for r in eligible if r.get("is_read") != "1"]
+    unread = [r["doi"] for r in eligible if r.get("is_read") != "1"]
     if unread:
         lines.append(f"○ 未精读：{len(unread)} 篇")
     lines.append("")
@@ -268,10 +268,10 @@ def full_exam(args, lib):
     for r in rows:
         d = (r.get("doi") or "").strip().lower()
         if d:
-            doi_map.setdefault(d, []).append(r["paper_id"])
+            doi_map.setdefault(d, []).append(r["doi"])
         t = lib.normalize_title(r.get("title") or "")
         if t:
-            title_map.setdefault(t, []).append(r["paper_id"])
+            title_map.setdefault(t, []).append(r["doi"])
     dup_doi = {k: v for k, v in doi_map.items() if len(v) > 1}
     dup_title = {k: v for k, v in title_map.items() if len(v) > 1}
     lines += [
@@ -295,7 +295,7 @@ def full_exam(args, lib):
     ]
     # 核验断言（决策记录 2026-09-04）：全库 xref_verified=true 且预印本零入库
     unverified = [
-        r["paper_id"]
+        r["doi"]
         for r in rows
         if (r.get("xref_verified") or "").strip().lower() not in ("1", "true")
     ]
@@ -329,7 +329,7 @@ def full_exam(args, lib):
         if t and t in active_title:
             keys.append("题名")
         if keys:
-            backflow.append(f"{r.get('paper_id', '?')}（{'、'.join(keys)}）")
+            backflow.append(f"{r.get('doi', '?')}（{'、'.join(keys)}）")
     pp_hits = _preprint_hits(rows, lib)
     lines += [
         "",
@@ -357,8 +357,9 @@ def full_exam(args, lib):
             if not os.path.isdir(subp) or not sub.startswith("round"):
                 continue
             for f in os.listdir(subp):
-                pid = os.path.splitext(f)[0]
-                if pid not in {r["paper_id"] for r in rows}:
+                from urllib.parse import unquote
+                pid = lib.normalize_doi(unquote(os.path.splitext(f)[0]))
+                if pid not in {r["doi"] for r in rows}:
                     orphans.append(f"{sub}/{f}")
     except OSError as e:
         print(f"扫描论文目录失败：{e}", file=sys.stderr)
@@ -377,6 +378,12 @@ def full_exam(args, lib):
         "03-library",
         f"库体检-{datetime.date.today().strftime('%Y%m%d')}.md",
     ))
+    policy_bad = [r.get("doi", "?") for r in rows if
+                  not lib.normalize_doi(r.get("doi")) or
+                  r.get("norm_type") not in ("journal-article", "proceedings-article", "book", "book-chapter") or
+                  r.get("review_field") not in ("computer-science", "other") or
+                  (r.get("norm_type") == "proceedings-article" and r.get("review_field") != "computer-science")]
+    lines.append("- DOI/领域准入：" + ("失败：" + "、".join(policy_bad) if policy_bad else "通过"))
     try:
         _write_report(out, lines)
     except RuntimeError as e:
@@ -384,7 +391,7 @@ def full_exam(args, lib):
         return 1
     print("\n".join(lines))
     print(f"报告落盘：{out}")
-    if not rows or unverified or backflow or pp_hits:
+    if not rows or unverified or backflow or pp_hits or policy_bad or dup_doi:
         print(
             "⛔ 核验断言未通过（见报告“核验断言”节），以退出码 1 失败。",
             file=sys.stderr,
@@ -457,12 +464,12 @@ def cite_audit(args, lib, path):
     except RuntimeError as e:
         print(str(e), file=sys.stderr)
         return 1
-    found = PID_RE.findall(text)
+    found = [lib.normalize_doi(d) or d for d in PID_RE.findall(text)]
     counts = {}
     for pid in found:
         counts[pid] = counts.get(pid, 0) + 1
     rows = lib.load_library(args.work_dir)
-    known = {r["paper_id"]: r for r in rows}
+    known = {r["doi"]: r for r in rows}
     unknown = sorted(p for p in counts if p not in known)
     b_used = sorted(
         p for p, r in known.items() if p in counts and (r.get("evidence") or "A") == "B"
@@ -472,7 +479,7 @@ def cite_audit(args, lib, path):
         f"引用的库内论文：{len(counts) - len(unknown)} 种，总出现 {sum(counts.values())} 次"
     )
     if unknown:
-        print(f"✗ 未知 paper_id（库中无行）{len(unknown)} 个：{'、'.join(unknown)}")
+        print(f"✗ 未知 doi（库中无行）{len(unknown)} 个：{'、'.join(unknown)}")
     if b_used:
         print(f"! 摘要级（B）引用 {len(b_used)} 种：{'、'.join(b_used)}")
         print(
@@ -488,7 +495,7 @@ def cite_audit(args, lib, path):
              f"摘要级引用：{', '.join(b_used) or '无'}",
              "本检查只验证编号与阅读状态，不证明论文支持对应论断。"]
     if not counts:
-        lines.append("未识别到 paper_id，不能认定引用通过；请审计保留编号的工作稿。")
+        lines.append("未识别到 doi，不能认定引用通过；请审计保留编号的工作稿。")
     if not unknown and not unready and counts:
         lines.append("编号与阅读状态检查通过；仍需按 claim-review.md 核回原文。")
     print("\n".join(lines))
@@ -506,7 +513,8 @@ def mark_read(args, lib):
     if not args.contribution.strip():
         print("--contribution 必填（一句话贡献）", file=sys.stderr)
         return 1
-    row = next((r for r in lib.load_library(args.work_dir) if r.get("paper_id") == args.mark_read), None)
+    args.mark_read = lib.normalize_doi(args.mark_read)
+    row = next((r for r in lib.load_library(args.work_dir) if r.get("doi") == args.mark_read), None)
     if row and args.evidence == "A":
         md = row.get("md_path") or ""
         if (row.get("fetch_status") != "ok" or not md
@@ -526,7 +534,7 @@ def mark_read(args, lib):
         print(str(e), file=sys.stderr)
         return 1
     if not hit:
-        print(f"库中无此 paper_id：{args.mark_read}", file=sys.stderr)
+        print(f"库中无此 doi：{args.mark_read}", file=sys.stderr)
         return 1
     if args.evidence == "B":
         print("注意：B=摘要级引用，仅支撑非核心论点（D2），终稿不加标记。")
@@ -702,4 +710,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     sys.exit(main())
-

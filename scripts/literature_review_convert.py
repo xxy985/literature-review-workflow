@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PDF 转 Markdown（C3）：source/papers/roundNN/<paper_id>.pdf → 同名 .md。
+"""PDF 转 Markdown（C3）：source/papers/roundNN/<doi>.pdf → 同名 .md。
 
 用法：python literature_review_convert.py <工作根目录> --round N [--papers id1,id2] [--force]
 - 依赖 pymupdf（缺它时明确报错并给安装命令，不静默降级）；
@@ -20,7 +20,7 @@ def _parse_args(argv):
     p.add_argument("work_dir", help="工作根目录")
     p.add_argument("--round", required=True, help="轮次编号 N（1-99）或 X（扩圈批次）")
     p.add_argument(
-        "--papers", default="", help="只处理指定 paper_id，逗号分隔；缺省处理整轮"
+        "--papers", default="", help="只处理指定 doi，逗号分隔；缺省处理整轮"
     )
     p.add_argument("--force", action="store_true", help="已有 md 也重转")
     return p.parse_args(argv)
@@ -40,7 +40,7 @@ def _grade(pages_text):
     return "low", per
 
 
-def convert_one(fitz, pdf_path, md_path, paper_id, header_lines):
+def convert_one(fitz, pdf_path, md_path, doi, header_lines):
     """转换单个 PDF，返回 (parse_quality, 页均字符)。失败抛 RuntimeError。"""
     try:
         doc = fitz.open(pdf_path)
@@ -91,7 +91,7 @@ def main(argv=None):
         return 1
     try:
         rows = lib.load_library(work_dir)
-        rows_by_id = {r.get("paper_id"): r for r in rows}
+        rows_by_id = {r.get("doi"): r for r in rows}
         round_dir = os.path.join(work_dir, "source", "papers", "round" + tag)
         if not os.path.isdir(round_dir):
             print(f"轮目录不存在：{round_dir}", file=sys.stderr)
@@ -103,9 +103,10 @@ def main(argv=None):
     want = [x.strip() for x in args.papers.split(",") if x.strip()]
     done, skipped, failed_files = [], [], []
     for name in pdfs:
-        pid = name[:-4]
+        from urllib.parse import unquote
+        pid = lib.normalize_doi(unquote(name[:-4]))
         row = rows_by_id.get(pid)
-        if want and pid not in want:
+        if want and pid not in [lib.normalize_doi(d) for d in want]:
             continue
         if row is None:
             print(f"! {pid}：库中无行，先由 fetch 入库再转换（跳过）", file=sys.stderr)
@@ -117,7 +118,6 @@ def main(argv=None):
             skipped.append(pid)
             continue
         header = [
-            f"paper_id: {pid}",
             f"title: {row.get('title') or ''}",
             f"doi: {row.get('doi') or ''}",
             f"url: {row.get('url') or ''}",
@@ -158,4 +158,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     sys.exit(main())
-

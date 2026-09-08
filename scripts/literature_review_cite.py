@@ -156,13 +156,13 @@ def _batch_meta(lib, limiter, wids, meta):
 def _parse_work(w, lib, ctx):
     """过滤并解析一条 OpenAlex 作品；命中过滤规则返回 None。"""
     wid = str(w.get('id') or '').rsplit('/', 1)[-1]
-    doi = (w.get('doi') or '').replace('https://doi.org/', '').strip()
+    doi = lib.normalize_doi(w.get('doi'))
     dkey = doi.lower()
     if dkey and (dkey in ctx['lib_dois'] or dkey in ctx['excl_dois']):
         return None
     title = (w.get('title') or '').strip()
     tkey = lib.normalize_title(title)
-    if tkey and (tkey in ctx['lib_titles'] or tkey in ctx['excl_titles']):
+    if not doi and tkey and tkey in ctx['excl_titles']:
         return None
     if str(w.get('type') or '').lower() not in ctx['whitelist']:
         return None
@@ -254,10 +254,10 @@ def run(args, lib, verify):
             continue
         if args.mode in ('refs', 'both'):
             for r in refs:
-                refs_edges.setdefault(r, set()).add(p.get('paper_id'))
+                refs_edges.setdefault(r, set()).add(p.get('doi'))
             related_set.update(rel)
         if args.mode in ('cited', 'both'):
-            _gather_cited(lib, limiter, wid, p.get('paper_id'),
+            _gather_cited(lib, limiter, wid, p.get('doi'),
                           args.per_page_cap, cited_edges, meta)
     if args.mode in ('refs', 'both'):
         discovered = set(refs_edges) | related_set
@@ -313,4 +313,3 @@ def main(argv=None):
 
 if __name__ == '__main__':
     sys.exit(main())
-

@@ -70,14 +70,15 @@ def _dedup_candidates(thread_dir, cand_path, lib):
     seen_dois, seen_titles = set(), set()
     out, n_lib, n_dup, dropped_lib = [], 0, 0, []
     for r in rows:
-        doi = (r.get('doi') or '').strip().lower()
+        doi = lib.normalize_doi(r.get('doi'))
+        r['doi'] = doi
         t = lib.normalize_title(r.get('title') or '')
-        if (doi and doi in lib_dois) or (t and t in lib_titles):
+        if doi and doi in lib_dois:
             n_lib += 1
             if len(dropped_lib) < 20:
                 dropped_lib.append('%s（%s）' % ((r.get('title') or ''), doi or '无DOI'))
             continue
-        if (doi and doi in seen_dois) or (t and t in seen_titles):
+        if doi and doi in seen_dois:
             n_dup += 1
             continue
         if doi:
@@ -99,7 +100,7 @@ def _dedup_candidates(thread_dir, cand_path, lib):
 
 def _fmt_row(p):
     return '- %s | %s | fetch=%s | source=%s | xref=%s' % (
-        p.get('paper_id') or '?',
+        p.get('doi') or '?',
         (p.get('title') or '')[:60].replace('\n', ' '),
         p.get('fetch_status') or '',
         p.get('source') or '',
@@ -219,4 +220,3 @@ def main(argv=None):
 
 if __name__ == '__main__':
     sys.exit(main())
-

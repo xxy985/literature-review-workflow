@@ -3,11 +3,11 @@
 
 被 literature_review_fetch / literature_review_cite 依赖，不直接作为命令行入口使用。
 
-既定决策（预印本一律排除；会议论文正当）：
+既定决策（预印本一律排除；仅计算机相关课题接受会议论文）：
 - 类型归一：OpenAlex 词表（article/review/book/...）与 CrossRef 词表
   （journal-article/posted-content/...）各自映射到统一归一空间再过白名单，
   避免两套词汇语义错位（OpenAlex article 其实涵盖期刊与会议论文）；
-- 核验顺序：OpenAlex 批量（每批 ≤50 个 DOI）为主，未命中者逐个 CrossRef 兜底；
+- 正式类型以 CrossRef 为准；OpenAlex 仅用于发现和正式 DOI 线索解析；
 - 只按 type 与仓库域判，不看期刊名（防误伤）；
 - 标题相似度 ≥0.8 方认可确认为同一论文（防串号）。
 
@@ -82,13 +82,7 @@ _SEL_RESOLVE = "id,doi,title,publication_year,type,primary_location"
 
 
 def _norm_doi(doi):
-    return (
-        (doi or "")
-        .replace("https://doi.org/", "")
-        .replace("http://dx.doi.org/", "")
-        .strip()
-        .lower()
-    )
+    return lib.normalize_doi(doi)
 
 
 def _host_is_preprint(w):
@@ -164,11 +158,13 @@ def _parse_crossref(msg):
     }
 
 
-def _verdict_from(rec):
+def _verdict_from(rec, review_field="other"):
     if rec is None:
         return "not_found"
     if rec.get("norm_type") == "preprint" or rec.get("is_preprint_host"):
         return "preprint"
+    if rec.get("norm_type") == "proceedings-article" and review_field != "computer-science":
+        return "conference_not_allowed"
     if rec.get("norm_type") in WHITELIST_NORM:
         return "accept"
     return "out_of_scope"
@@ -181,52 +177,28 @@ def _crossref_single(doi, limiter):
     except (RuntimeError, ValueError):
         return None
     msg = data.get("message") if isinstance(data, dict) else None
-    return _parse_crossref(msg) if msg else None
+    if not msg or _norm_doi(msg.get("DOI")) != _norm_doi(doi):
+        return None
+    return _parse_crossref(msg)
 
 
-def verify_batch(dois):
-    """核验一批 DOI：OpenAlex 批量为主，CrossRef 兜底未命中者。
+def verify_batch(dois, review_field="other"):
+    """核验一批 DOI：CrossRef 确认正式类型；OpenAlex 只负责发现。
 
     返回按输入顺序对齐的 list[dict]（字段见模块 docstring）；网络异常时
     对应条目记 verdict='lookup_failed'（不谎报成功）。
     """
     limiter = lib.RateLimiter()
-    clean = []
-    for d in dois or []:
-        nd = _norm_doi(d)
-        if nd:
-            clean.append(nd)
+    clean = [_norm_doi(d) for d in dois or []]
     out = dict.fromkeys(range(len(clean)), None)
-    # 1) OpenAlex 批量
-    for start in range(0, len(clean), BATCH_SIZE):
-        chunk = clean[start : start + BATCH_SIZE]
-        f = "|".join("doi:" + d for d in chunk)
-        try:
-            data = lib.http_get_json(
-                OA_BASE, {"filter": f, "select": _SEL_VERIFY}, limiter=limiter
-            )
-        except (RuntimeError, ValueError):
-            data = None
-        if not data:
-            continue
-        found = {}
-        for w in data.get("results") or []:
-            rec = _parse_openalex(w)
-            kd = _norm_doi(rec.get("doi"))
-            if kd:
-                found[kd] = rec
-        for i, d in enumerate(chunk):
-            if d in found:
-                out[start + i] = found[d]
-    # 2) CrossRef 兜底（仅未命中）
     for i, d in enumerate(clean):
-        if out.get(i) is None:
-            out[i] = _crossref_single(d, limiter)
+        # OpenAlex article 混合期刊与会议；正式类型必须由 CrossRef 确认。
+        out[i] = _crossref_single(d, limiter) if d else None
     # 3) 定 verdict
     results = []
     for i, d in enumerate(clean):
         rec = out.get(i)
-        verdict = _verdict_from(rec)
+        verdict = _verdict_from(rec, review_field)
         if rec is None:
             results.append(
                 {
@@ -281,8 +253,7 @@ def resolve_formal(title):
     rec = _parse_openalex(best)
     if _norm_doi(rec.get("doi")) == "":
         return ""
-    if _verdict_from(rec) != "accept":
-        return ""
+    # 这里只返回线索 DOI，fetch 必须再次通过 CrossRef 正式类型准入。
     return rec["doi"]
 
 
@@ -342,7 +313,7 @@ def _selftest():
         and rec["pages"] == "7-6"
         and rec["norm_type"] == "journal-article",
     )
-    check("DOI 归一", _norm_doi("https://doi.org/10.1/X ") == "10.1/x")
+    check("DOI 归一", _norm_doi("https://doi.org/10.1000/X ") == "10.1000/x")
     total = 10
     print("SELFTEST " + ("OK" if ok[0] == total else f"FAILED ({ok[0]}/{total})"))
     return 0 if ok[0] == total else 1
@@ -364,4 +335,3 @@ if __name__ == "__main__":
     import sys
 
     sys.exit(_main())
-

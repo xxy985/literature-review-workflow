@@ -4,6 +4,8 @@
 
 ## C1：研究任务与候选池
 
+门1必须记录课题领域 `computer-science` 或 `other` 及依据。仅前者接受会议论文；交叉领域若归属含混，默认 other，交门1裁决。此后每次 fetch 都传 `--review-field <已确认值>`，该参数遗漏时默认 other。候选发现不等于准入；入库由 CrossRef 类型核验把关，不能使用 OpenAlex article 作为期刊证明。
+
 输入：用户主题、已有材料及用途。先记录研究问题、综述类型（叙述/范围/系统等）、读者、范围与预期贡献到 artifacts/01-topic/研究任务-v1.md。信息不足但可推断时显式列默认值；方向真正含混时给2–3个子方向供门1选择。不得把本流程自动声称为系统综述，系统综述需另有纳排标准、完整检索记录及相应方法要求。
 
 设计3–5组同义词、上下位词与时间窗检索式，逐组 `search --query "..."`。候选池按日期合并；每次完成后保留版本快照，推荐与采集引用快照。去重后60为软下限，不足说明原因。官方统计、标准等单列来源、日期与具体支撑用途，不伪装为论文。
@@ -35,6 +37,6 @@
 
 ## 人工补缺与已有材料
 
-人工补缺按清单将 paper_id.pdf 放 source/manual/roundNN 或 roundXX，运行 `fetch --collect-manual --round N|X`，再 convert 并更新阅读记录。人工补入不会自动变成已读A。
+人工补缺按清单给出的 DOI 编码文件名放 source/manual/roundNN 或 roundXX，运行 `fetch --collect-manual --round N|X`，再 convert 并更新阅读记录。例如 `10.1234/example` 对应 `10.1234%2Fexample.pdf`。人工补入不会自动变成已读A。
 
 已有文献集合仍需题名/DOI候选TSV通过 fetch 核验入账，PDF再按人工补缺入口关联；convert不负责创建库行。方向已明确可从首轮准备开始；未确认范围则先门1。无DOI或未能核验的输入保留为线索，不直接绕过入库规则。

@@ -276,9 +276,10 @@ def _merge(groups, multiple, lib):
     for gno, q, rows in groups:
         kept = 0
         for r in rows:
-            doi = (r.get('doi') or '').strip().lower()
+            doi = lib.normalize_doi(r.get('doi'))
+            r['doi'] = doi
             t = lib.normalize_title(r.get('title') or '')
-            if (doi and doi in seen_doi) or (t and t in seen_title):
+            if doi and doi in seen_doi:
                 continue
             if doi:
                 seen_doi.add(doi)
@@ -364,4 +365,3 @@ def main(argv=None):
 
 if __name__ == '__main__':
     sys.exit(main())
-
