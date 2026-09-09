@@ -1,0 +1,8 @@
+# literature-review-workflow dependencies / 依赖清单
+#
+# Core retrieval/verification uses the standard library. 核心仅用标准库。
+# Stage-specific dependencies / 按阶段安装：
+
+pymupdf>=1.24    # PDF to Markdown / PDF转Markdown
+python-docx>=1.1 # DOCX handoff and delivery / DOCX交接与交付
+

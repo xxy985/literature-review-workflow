@@ -4,6 +4,7 @@ Chinese and English packages are maintained, built, and validated together in ea
 
 ## 2026-09-09
 
+- Reorganized the synchronous editions as two directly deployable directories: `en/literature-review-workflow/` and `zh/literature-review-workflow-zh/`. Removed ZIP/download distribution and the separate bilingual coordination file.
 - Shipped synchronized Chinese and English entry points, stage guides, templates, and evaluation documents. Each language package is independently deployable and uses the same deterministic scripts and machine-readable contracts.
 - Defined the final package as one frozen manuscript delivered in clean Markdown, final DOCX, a complete LaTeX project, and the PDF compiled from it. The PDF is the typesetting acceptance reference.
 - Added content-baseline, clean-output, resource, cross-format consistency, and actual-check requirements.

@@ -5,7 +5,7 @@ description: A recoverable, evidence-first literature review workflow. Use when 
 
 # Literature Review Workflow
 
-This is the English edition of the skill. All paths below are relative to the installed package root, which contains this file and `scripts/`. It does not require the Chinese package. Research judgment belongs to the Agent; scripts perform deterministic operations; humans approve consequential decisions. Discussing the skill does not start paper production.
+This is the standalone English edition. All paths below are relative to this package root, which contains this file and `scripts/`; it does not require the Chinese package. Research judgment belongs to the Agent; scripts perform deterministic operations; humans approve consequential decisions. Discussing the skill does not start paper production.
 
 ## Start and resume
 

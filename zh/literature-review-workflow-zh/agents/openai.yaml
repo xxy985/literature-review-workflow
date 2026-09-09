@@ -2,7 +2,7 @@ interface:
   display_name: "Literature Review Workflow 综述推进"
   short_description: "Evidence-based reviews with checkpoints / 综述推进"
   default_prompt: >-
-    Use $literature-review-workflow to advance my literature review in my preferred language,
+    Use $literature-review-workflow-zh to advance my Chinese literature review,
     resume from progress.md, and pause at the next decision gate or genuine blocker.
 
 

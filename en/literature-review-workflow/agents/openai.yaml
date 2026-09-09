@@ -1,0 +1,4 @@
+interface:
+  display_name: "Literature Review Workflow"
+  short_description: "Evidence-first reviews with checkpoints and decision gates"
+  default_prompt: "Use $literature-review-workflow to advance my English literature review from progress.md, follow the operating guide, and pause at the next decision gate or genuine blocker."
