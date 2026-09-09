@@ -86,7 +86,7 @@ def main(argv=None):
     for executable in ("latexmk", "xelatex"):
         present = shutil.which(executable)
         row(OK if present else (BAD if args.delivery else WARN), executable,
-            present or "C8 必需：安装 TeX Live 或 MiKTeX 后重试；不能用 Word 替代终稿")
+            present or "C8 必需：安装 TeX Live 或 MiKTeX 后重试；MD/DOCX/LaTeX及编译PDF须一并交付")
     if fatal[0]:
         print("核心环境故障：先解决上述 ✗ 项再部署。")
         return 1

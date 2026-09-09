@@ -109,7 +109,7 @@ python scripts/literature_review_env_check.py --net
 
 - 预印本不进入正式文献库；已正式发表论文可以使用其预印本镜像作为全文来源。
 - 仅计算机相关领域接受会议论文；其他领域及未确认领域默认排除。CrossRef 确认正式类型，OpenAlex article 不能证明是期刊论文。
-- DOI 为全程唯一论文标识。最终交付固定为 LaTeX 工程及编译 PDF；Word 仅作助理交接。
+- DOI 为全程唯一论文标识。最终同步交付同一终稿的MD、DOCX、完整LaTeX工程，并附编译PDF；三个格式内容一致，以PDF作为正式排版验收依据。
 - 不绕过付费墙；下载失败会留下人工补缺清单。
 - 摘要级证据只能支撑非核心论点，不能伪装成全文证据。
 - 所有材料只落本地，不自动上传、发布、邮件发送或同步到外部服务。
@@ -130,7 +130,7 @@ python scripts/literature_review_env_check.py --net
 - 精读证据、跨论文综合及核心论断核验规范；
 - 工作稿 `[doi:...]` 与终稿引文映射，显式区分机械审计和语义核验。
 
-交付前执行 `python scripts/literature_review_env_check.py --delivery`；编译入口为 `python scripts/literature_review_latex.py <工程目录> <新交付目录>`，详见 [LaTeX交付规范](references/latex-delivery.md)。缺编译器或编译失败即阻塞，不能以 Word/Markdown 替代终稿。
+交付前执行 `python scripts/literature_review_env_check.py --delivery`；编译入口为 `python scripts/literature_review_latex.py <工程目录> <新交付目录>`，详见 [多格式终稿交付规范](references/latex-delivery.md)。MD、DOCX、LaTeX及PDF均须交付并检查；编译脚本只负责LaTeX构建，其余格式制作和跨格式一致性核对由Agent执行，不能因某个脚本通过就宣布整套成果验收通过。
 
 维护者可运行 `python -m unittest discover -s evals -p "test_*.py" -v`。引用审计 `--strict` 在零可识别引用、未知编号或阅读状态不完整时失败；轮验收未通过返回2。`--fulltext-only` 让首轮配额只计全文；下载中断后的 `--limit` 是本次新增名额，需扣除已取得数量。
 
