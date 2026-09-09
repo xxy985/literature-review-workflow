@@ -28,6 +28,8 @@ def payload(language, version):
     for path in sorted((ROOT / "scripts").glob("*.py")):
         files["scripts/" + path.name] = path.read_bytes()
     files["evals/test_workflow.py"] = (ROOT / "evals/test_workflow.py").read_bytes()
+    # Normalize text so Git's Windows line-ending conversion cannot change releases.
+    files = {name: data.replace(b"\r\n", b"\n") for name, data in files.items()}
     digest = hashlib.sha256()
     for name, data in sorted(files.items()):
         digest.update(name.encode("utf-8") + b"\0" + data)

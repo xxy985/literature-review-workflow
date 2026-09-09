@@ -1,2 +1,2 @@
-f20ad5133d06bf2a82a0f48953cac90afa67c0435e2a27d9b970307b828b6406  literature-review-workflow-en.zip
-550432ee1274b934e8c92a9adcbb08bf2dd96a104207ef2a13e97bf77d7d7fe9  literature-review-workflow-zh-CN.zip
+6d5236496941f32767ff08bdfcf7fc010b0dd0b7c9b74eebec6c088215dd50f6  literature-review-workflow-en.zip
+245cd10cd57c48beced69c7df2b0f04bf52cda102f521b3df81e836eaa1925a4  literature-review-workflow-zh-CN.zip
