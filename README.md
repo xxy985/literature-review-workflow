@@ -1,5 +1,9 @@
 # Literature Review Workflow
 
+[English package](https://github.com/xxy985/literature-review-workflow/raw/refs/heads/master/dist/literature-review-workflow-en.zip) | [中文包下载](https://github.com/xxy985/literature-review-workflow/raw/refs/heads/master/dist/literature-review-workflow-zh-CN.zip)
+
+中英文版本同步维护、构建和验证，共享脚本、数据契约及VERSION.json版本标识。下载对应ZIP解压，注册其中含SKILL.md的目录即可独立部署，无需另一语言包。两包技能名称相同，同一宿主只安装一种；切换时替换技能安装目录，不移动独立的论文工作目录。Agent按用户语言交流，论文语言另行确认。部分共享脚本日志和固定产物名仍为中文，由Agent解释并保留实际路径。
+
 一个面向 Agent 的半自动学术综述生产 Skill。
 
 它帮助具备终端、文件读写和网络能力的 Agent，按可恢复、可审计的方式推进：

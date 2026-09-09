@@ -1,9 +1,11 @@
 ---
 name: literature-review-workflow
-description: 综述论文半自动生产技能。用户要求启动、推进或继续综述流程时使用；支持跨会话恢复、文献采集精读、跨论文综合、论断核验和四道人工作决策门。需终端、Python、本地读写及检索阶段的网络能力。
+description: Bilingual literature review workflow / 综述论文半自动生产技能。Use when asked to start, advance, or resume a literature review; 用户要求启动、推进或继续综述流程时使用。Supports source verification, synthesis, claim review, recovery, and four decision gates. Requires Python, terminal, local files, and research-stage network access.
 ---
 
 # 综述论文半自动工作流
+
+本包为中文独立部署版，所有相对路径均位于本包内；英文用户可从 [部署说明](README.md) 的英文包链接独立安装。两包同步维护、构建及验证，脚本与数据契约一致。交流及笔记沿用用户语言，论文语言单独确认。
 
 目标：从可追溯的文献证据形成有比较、有论证的综述。Agent 负责研究判断与执行；脚本负责确定性机械操作；人在关键门处拍板。讨论技能设计或闲聊不启动论文生产。
 

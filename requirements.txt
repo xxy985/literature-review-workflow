@@ -1,8 +1,8 @@
-# literature-review-workflow（综述论文半自动生产）依赖清单
+# literature-review-workflow dependencies / 依赖清单
 #
-# 核心（C1-C5：检索 / 核验 / 下载 / 去重 / 扩圈）：仅 Python 标准库，零第三方依赖。
-# 以下为可选依赖，按所在走廊需要安装：
+# Core retrieval/verification uses the standard library. 核心仅用标准库。
+# Stage-specific dependencies / 按阶段安装：
 
-pymupdf>=1.24    # C3 literature_review_convert：PDF 转 Markdown（pip install pymupdf）
-python-docx>=1.1 # C7-C8 饺子交接：docx 与 Markdown 互转（pip install python-docx）
+pymupdf>=1.24    # PDF to Markdown / PDF转Markdown
+python-docx>=1.1 # DOCX handoff and delivery / DOCX交接与交付
 

@@ -11,7 +11,7 @@
 1. **向后引用**（references）：种子文献列表的参考文献 → 出现频次高者 = 库内多篇共同依赖的地基
 2. **向前被引**（cited-by，默认不开启：受引用窗口滞后的影响）→ 打开时适用于种子较老的情况
 3. **相关推荐**（related_works）：同一论文的"邻居"，捞群落边缘
-以上四项中，`literature_review_cite.py` 当前自动执行的是 references、cited-by、related works 及其评分排序；它输出候选 TSV，**不自动入库**。
+`literature_review_cite.py` 当前自动执行上述三个通道及其评分排序；它输出候选 TSV，**不自动入库**。
 
 ## 三、AI 手工扩展通道（脚本不代替判断）
 
@@ -22,7 +22,7 @@
 
 这两项不是 `literature_review_cite.py` 的自动功能；若没有足够全文或摘要材料，应如实标记“未执行”及原因。
 
-## 三、AI 判断层（脚本管不了的部分）
+## 四、AI 判断层（脚本管不了的部分）
 
 对脚本产出的扩圈候选（通常 40–100 条），AI 逐条做三层筛选，而非机械截断得分排名：
 
@@ -32,7 +32,7 @@
 
 筛选结论按 `templates/expansion-selection.md` 落到 `artifacts/03-library/扩圈筛选说明.md`：入选/剔除清单 + 每篇一句话理由（可复用五维打分语言）。
 
-## 四、盲区审计（每轮结束 + 扩圈后各做一次）
+## 五、盲区审计（每轮结束 + 扩圈后各做一次）
 
 **固定切面**（不看这五项，审计等于没做）：
 
@@ -48,20 +48,20 @@
 
 **收敛信号**：连续一轮（10篇）不再填补缺口，或扩圈候选填补率低，提示应检查是否饱和；这些信号不自动解除主体40/扩圈20的规模约定。数量不足时列证据交用户裁决；数量足够但核心问题仍无支持时补检或收缩论断。30%仅为待实测参考值，不作为自动通过阈值。
 
-## 五、负例（禁止的扩圈行为）
+## 六、负例（禁止的扩圈行为）
 
 - ❌ 为了凑 20 篇把同社区第 3、4、5 名变体全塞进扩圈名单
 - ❌ 脚本默认评分直接截断 top20 交差（评分只做候选排序，不做决策）
 - ❌ 审计报告只写"已搜索很全面"式的敷衍句，不列具体切面结论
 - ❌ 引入库外文献进正文（确需额外文献 → 回完整 fetch 管线入库后才可用）
 
-## 六、最小操作示例
+## 七、最小操作示例
 
 1. 先运行自动引文发现：
 
    `python scripts/literature_review_cite.py <工作根目录> --target 40 --mode both`
 
-2. 阅读输出的 `artifacts/03-library/扩圈候选-<日期>.tsv`，按本文件第三节的社区去重、平衡和前沿价值规则筛选，填写 `templates/expansion-selection.md` 对应产物。
+2. 阅读输出的 `artifacts/03-library/扩圈候选-<日期>.tsv`，按本文件第四节的社区去重、平衡和前沿价值规则筛选，填写 `templates/expansion-selection.md` 对应产物。
 3. 记录本轮盲区判断：复制 `templates/blind-spot-audit.md` 为 `artifacts/03-library/盲区审计-roundX.md`，逐项填写覆盖、未覆盖理由和再进入条件。
 4. 对入选候选另存一个待入库 TSV，使用 `literature_review_fetch.py <工作根目录> --candidates <待入库.tsv> --round X`，再用 `literature_review_convert.py <工作根目录> --round X` 和 `check --full` 完成核验。
 
